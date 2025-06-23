@@ -8,6 +8,7 @@ repository = "https://github.com/Inspirateur/binary-greedy-meshing"
 keywords = ["meshing", "greedy", "binary", "voxel", "chunk"]
 
 [dependencies]
+ndshape = "0.3.0"
 
 [dev-dependencies]
 bevy = "0.16"
@@ -16,3 +17,8 @@ criterion = "0.5"
 [[bench]]
 name = "mesh"
 harness = false
+
+[features]
+# `default` lists the features automatically active.
+# Leave it empty so the crate builds in XYZ mode out-of-the-box.
+default = []

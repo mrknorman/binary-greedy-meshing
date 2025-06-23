@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate alloc;
 
+use core::ops::Index;
 mod face;
 use alloc::{boxed::Box, collections::btree_set::BTreeSet, string::String, vec::Vec};
 pub use face::*;
@@ -13,6 +14,23 @@ pub const CS_P2: usize = CS_P * CS_P;
 pub const CS_P3: usize = CS_P * CS_P * CS_P;
 const P_MASK: u64 = !(1 << 63 | 1);
 pub(crate) const MASK_6: u64 = 0b111111;
+
+// ---- generic slice-or-view markers ----
+pub trait Voxels: Index<usize, Output = u16> + Sync {}
+impl<T> Voxels for T where T: Index<usize, Output = u16> + Sync + ?Sized {}
+pub trait Masks: Index<usize, Output = u64> + Sync {}
+impl<T> Masks  for T where T: Index<usize, Output = u64> + Sync + ?Sized {}
+
+// Helper used by greedy‑merge loops so we don’t touch `get_axis_index`.
+#[inline(always)]
+fn index(axis: usize, a: usize, b: usize, c: usize) -> usize {
+    match axis {
+        0 => a + b * CS_P + c * CS_P2, // ±X faces – identical in both layouts
+        1 => b + a * CS_P + c * CS_P2, // ±Y faces – identical in both layouts
+        _ => b + c * CS_P + a * CS_P2, // ±Z faces – identical in both layouts
+    }
+}
+
 
 #[derive(Debug)]
 pub struct Mesher {
@@ -78,7 +96,17 @@ impl Mesher {
 
     }
 
-    fn fast_face_culling(&mut self, voxels: &[u16], opaque_mask: &[u64], trans_mask: &[u64]) {
+    fn fast_face_culling<V, M>(
+            &mut self,
+            voxels: &V,
+            opaque_mask: &M,
+            trans_mask: &M,
+        )
+        where
+            V: Voxels  + ?Sized,
+            M: Masks  + ?Sized,
+        {
+        
         // Hidden face culling
         for a in 1..(CS_P-1) {
             let a_ = a * CS_P;
@@ -132,7 +160,10 @@ impl Mesher {
         }
     }
 
-    fn face_merging(&mut self, voxels: &[u16]) {
+    fn face_merging<V>(&mut self, voxels: &V)
+    where
+        V: Voxels  + ?Sized,
+    {
         // Greedy meshing faces 0-3
         for face in 0..=3 {
             let axis = face / 2;
@@ -265,11 +296,21 @@ impl Mesher {
         }
     }
 
+
     /// Meshes a voxel buffer representing a chunk, using an opaque and transparent mask with 1 u64 per column with 1 bit per voxel in the column,
     /// signaling if the voxel is opaque or transparent.
     /// This is ~4x faster than the regular mesh method but requires maintaining 2 masks for each chunk.
     /// See https://github.com/Inspirateur/binary-greedy-meshing?tab=readme-ov-file#what-to-do-with-mesh_dataquads for using the output
-    pub fn fast_mesh(&mut self, voxels: &[u16], opaque_mask: &[u64], trans_mask: &[u64]) {
+    pub fn fast_mesh<V, M>(
+            &mut self,
+            voxels: &V,
+            opaque_mask: &M,
+            trans_mask: &M,
+        )
+        where
+            V: Voxels  + ?Sized,
+            M: Masks  + ?Sized,
+        {
         self.fast_face_culling(voxels, opaque_mask, trans_mask);
         self.face_merging(voxels);
     }
@@ -292,11 +333,7 @@ fn face_value(v1: u16, v2: u16, transparents: &BTreeSet<u16>) -> u64 {
 #[inline]
 fn get_axis_index(axis: usize, a: usize, b: usize, c: usize) -> usize {
     // TODO: figure out how to shuffle this around to make it work with YZX
-    match axis {
-        0 => b + (a * CS_P) + (c * CS_P2),
-        1 => b + (c * CS_P) + (a * CS_P2),
-        _ => c + (a * CS_P) + (b * CS_P2)
-    }
+    index(axis, a, b, c)
 }
 
 #[inline]
